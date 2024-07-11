@@ -1,0 +1,17 @@
+---
+database:
+  host: localhost
+  name: laws
+  port: 6333
+embedding:
+  dim: 768
+  name: BAAI/bge-large-zh-v1.5
+llm:
+  api_base: https://open.bigmodel.cn/api/paas/v4/
+  api_key: YOUR_KEY
+  name: glm-4-air
+  proxy_model: true
+  temperature: 0.01
+rerank:
+  name: BAAI/bge-reranker-large
+  top_n: 5
