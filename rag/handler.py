@@ -1,3 +1,4 @@
+import nest_asyncio
 import qdrant_client
 from llama_index.core import (
     Settings,
@@ -5,6 +6,7 @@ from llama_index.core import (
     StorageContext,
     VectorStoreIndex,
 )
+from llama_index.core.llama_dataset import LabelledRagDataset, download_llama_dataset
 from llama_index.core.node_parser import SentenceWindowNodeParser
 from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
@@ -13,8 +15,12 @@ from llama_index.core.postprocessor import (
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from qdrant_client.http.models import Distance, VectorParams
+from tqdm.asyncio import tqdm_asyncio
 
-from core.proxy_model import ProxyModel
+from core import EvaluationMode, ProxyModel
+from evaluator.llama_index.base import RagEvaluatorPack
+
+nest_asyncio.apply()
 
 
 class RagHandler:
@@ -23,6 +29,9 @@ class RagHandler:
             host=config.database.host, port=config.database.port
         )
         self.client = client
+        self.aclient = qdrant_client.AsyncQdrantClient(
+            host=config.database.host, port=config.database.port
+        )
         self.config = config
         self.rerank_processor = SentenceTransformerRerank(
             model=config.rerank.name, top_n=config.rerank.top_n
@@ -31,11 +40,11 @@ class RagHandler:
         self.index = None
         self.query_engine = None
 
-        embed_model = HuggingFaceEmbedding(
+        self.embed_model = HuggingFaceEmbedding(
             model_name=self.config.embedding.name,  # max_length=self.config.embedding.dim
         )
 
-        llm = ProxyModel(
+        self.llm = ProxyModel(
             model_name=self.config.llm.name,
             api_base=self.config.llm.api_base,
             api_key=self.config.llm.api_key,
@@ -43,8 +52,8 @@ class RagHandler:
             max_tokens=2048,
         )
 
-        Settings.llm = llm
-        Settings.embed_model = embed_model
+        Settings.llm = self.llm
+        Settings.embed_model = self.embed_model
 
     def build(self, raw_data_path: str):
         # create the sentence window node parser w/ default settings
@@ -58,8 +67,6 @@ class RagHandler:
         documents = []
         for docs in reader.iter_data():
             for doc in docs:
-                # do something with the doc
-                print(doc.metadata)
                 doc.text = doc.text.upper()
                 documents.append(doc)
 
@@ -76,8 +83,12 @@ class RagHandler:
         response = query_engine.query(question)
         return response
 
-    def evaluate(self, question: str):
-        pass
+    async def evaluate(self, evaluation_dataset_path: str, mode: EvaluationMode):
+        match mode:
+            case EvaluationMode.LlamaIndex:
+                await self.__evaluate_by_llama_index(evaluation_dataset_path)
+            case EvaluationMode.Deepeval:
+                pass
 
     def __construct_query_engine(self):
         if not self.query_engine:
@@ -101,3 +112,21 @@ class RagHandler:
                 vector_store=vector_store,
             )
         return self.index
+
+    async def __evaluate_by_llama_index(self, evaluation_dataset_path: str):
+        rag_dataset = LabelledRagDataset.from_json(evaluation_dataset_path)
+
+        query_engine = self.__construct_query_engine()
+
+        rag_evaluator_pack = RagEvaluatorPack(
+            rag_dataset=rag_dataset,
+            query_engine=query_engine,
+            judge_llm=self.llm,
+            embed_model=self.embed_model,
+        )
+
+        benchmark_df = await rag_evaluator_pack.arun(
+            batch_size=20,  # batches the number of openai api calls to make
+            sleep_time_in_seconds=1,
+        )
+        print(benchmark_df)
