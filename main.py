@@ -2,6 +2,7 @@ import typer
 import yaml
 from easydict import EasyDict
 
+from core import EvaluationMode
 from rag import RagHandler
 from raptor import RaptorHandler
 
@@ -18,7 +19,7 @@ config = read_yaml_config("./config.yaml")
 
 
 @app.command()
-def build(mode: str = "rag", raw_data_path: str = "./data"):
+def build(mode: str = "rag", raw_data_path: str = "./data/source_files"):
     handler = fetch_handler(mode)
     handler.build(raw_data_path=raw_data_path)
 
@@ -28,6 +29,16 @@ def ask(mode: str = "rag", question: str = "什么样的数据算是个人数据
     handler = fetch_handler(mode)
     window_response = handler.ask(question)
     print(window_response)
+
+
+@app.command()
+def evaluate(
+    mode: str = "rag",
+    evaluation_dataset_path: str = "./data/evaluation_dataset/rag_dataset.json",
+    evaluation_mode: EvaluationMode = EvaluationMode.DeepEval,
+):
+    handler = fetch_handler(mode)
+    handler.evaluate(evaluation_dataset_path, evaluation_mode)
 
 
 def fetch_handler(mode: str):

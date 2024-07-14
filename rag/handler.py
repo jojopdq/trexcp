@@ -6,7 +6,7 @@ from llama_index.core import (
     StorageContext,
     VectorStoreIndex,
 )
-from llama_index.core.llama_dataset import LabelledRagDataset, download_llama_dataset
+from llama_index.core.llama_dataset import LabelledRagDataset
 from llama_index.core.node_parser import SentenceWindowNodeParser
 from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
@@ -14,11 +14,9 @@ from llama_index.core.postprocessor import (
 )
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-from qdrant_client.http.models import Distance, VectorParams
-from tqdm.asyncio import tqdm_asyncio
 
 from core import EvaluationMode, ProxyModel
-from evaluator.llama_index.base import RagEvaluatorPack
+from evaluator import DeepEvalEvaluator, RagEvaluatorPack
 
 nest_asyncio.apply()
 
@@ -83,12 +81,12 @@ class RagHandler:
         response = query_engine.query(question)
         return response
 
-    async def evaluate(self, evaluation_dataset_path: str, mode: EvaluationMode):
+    def evaluate(self, evaluation_dataset_path: str, mode: EvaluationMode):
         match mode:
             case EvaluationMode.LlamaIndex:
-                await self.__evaluate_by_llama_index(evaluation_dataset_path)
-            case EvaluationMode.Deepeval:
-                pass
+                self.__evaluate_by_llama_index(evaluation_dataset_path)
+            case EvaluationMode.DeepEval:
+                self.__evaluate_by_deepeval(evaluation_dataset_path)
 
     def __construct_query_engine(self):
         if not self.query_engine:
@@ -113,7 +111,13 @@ class RagHandler:
             )
         return self.index
 
-    async def __evaluate_by_llama_index(self, evaluation_dataset_path: str):
+    def __evaluate_by_deepeval(self, evaluation_dataset_path: str):
+        query_engine = self.__construct_query_engine()
+        evaluator = DeepEvalEvaluator(query_engine=query_engine, llm=self.llm)
+        dataset = evaluator.generate(evaluation_dataset_path=evaluation_dataset_path)
+        evaluator.evaluate(dataset)
+
+    def __evaluate_by_llama_index(self, evaluation_dataset_path: str):
         rag_dataset = LabelledRagDataset.from_json(evaluation_dataset_path)
 
         query_engine = self.__construct_query_engine()
@@ -125,7 +129,7 @@ class RagHandler:
             embed_model=self.embed_model,
         )
 
-        benchmark_df = await rag_evaluator_pack.arun(
+        benchmark_df = rag_evaluator_pack.run(
             batch_size=20,  # batches the number of openai api calls to make
             sleep_time_in_seconds=1,
         )

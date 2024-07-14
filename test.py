@@ -1,14 +1,9 @@
-import asyncio
-
-import nest_asyncio
 import yaml
 from easydict import EasyDict
 
 from core import EvaluationMode
 from rag import RagHandler
 from raptor import RaptorHandler
-
-nest_asyncio.apply()
 
 
 def read_yaml_config(file_path):
@@ -25,11 +20,12 @@ handler = RagHandler(config)
 handler.build(raw_data_path="./data/source_files")
 
 evaluation_dataset_path = "./data/evaluation_dataset/rag_dataset.json"
-mode = EvaluationMode.LlamaIndex
+mode = EvaluationMode.DeepEval
+
+handler.evaluate(evaluation_dataset_path, mode)
+
+# async def run_evaluation() -> asyncio.coroutine:
+#    await handler.evaluate(evaluation_dataset_path, mode)
 
 
-async def run_evaluation() -> asyncio.coroutine:
-    await handler.evaluate(evaluation_dataset_path, mode)
-
-
-asyncio.run(run_evaluation())
+# asyncio.run(run_evaluation())

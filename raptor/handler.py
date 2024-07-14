@@ -9,7 +9,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 
 from core import EvaluationMode, ProxyModel
-from evaluator.llama_index.base import RagEvaluatorPack
+from evaluator import DeepEvalEvaluator, RagEvaluatorPack
 from raptor.base import RaptorPack, RaptorRetriever
 
 nest_asyncio.apply()
@@ -83,14 +83,35 @@ class RaptorHandler:
         )
         return query_engine.query(question)
 
-    async def evaluate(self, evaluation_dataset_path: str, mode: EvaluationMode):
+    def evaluate(self, evaluation_dataset_path: str, mode: EvaluationMode):
         match mode:
             case EvaluationMode.LlamaIndex:
-                await self.__evaluate_by_llama_index(evaluation_dataset_path)
-            case EvaluationMode.Deepeval:
-                pass
+                self.__evaluate_by_llama_index(evaluation_dataset_path)
+            case EvaluationMode.DeepEval:
+                self.__evaluate_by_deepeval(evaluation_dataset_path)
 
-    async def __evaluate_by_llama_index(self, evaluation_dataset_path: str):
+    def __evaluate_by_deepeval(self, evaluation_dataset_path: str):
+        vector_store = QdrantVectorStore(
+            aclient=self.aclient, collection_name=self.collection_name
+        )
+        retriever = RaptorRetriever(
+            [],
+            embed_model=self.embed_model,  # used for embedding clusters
+            llm=self.llm,  # used for generating summaries
+            vector_store=vector_store,  # used for storage
+            similarity_top_k=2,  # top k for each layer, or overall top-k for collapsed
+            mode="collapsed",  # sets default mode
+            # mode="tree_traversal",  # sets default mode
+        )
+        query_engine = RetrieverQueryEngine.from_args(
+            retriever,
+            llm=self.llm,
+        )
+        evaluator = DeepEvalEvaluator(query_engine=query_engine, llm=self.llm)
+        dataset = evaluator.generate(evaluation_dataset_path=evaluation_dataset_path)
+        evaluator.evaluate(dataset)
+
+    def __evaluate_by_llama_index(self, evaluation_dataset_path: str):
         rag_dataset = LabelledRagDataset.from_json(evaluation_dataset_path)
 
         vector_store = QdrantVectorStore(
@@ -116,7 +137,7 @@ class RaptorHandler:
             embed_model=self.embed_model,
         )
 
-        benchmark_df = await rag_evaluator_pack.arun(
+        benchmark_df = rag_evaluator_pack.run(
             batch_size=20,  # batches the number of openai api calls to make
             sleep_time_in_seconds=1,
         )
